@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>DK AI Assistant</title>
+<style>
+:root{--bg:#07111f;--panel:#0b1727;--panel2:#102238;--line:#1e344d;--text:#eef5ff;--muted:#91a4ba;--blue:#6475ff}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}body{overflow:hidden}
+.app{height:100dvh;display:flex;flex-direction:column;background:radial-gradient(circle at 50% -10%,#213d72 0,transparent 38%),var(--bg)}
+header{height:62px;min-height:62px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 14px;background:#07111fee;backdrop-filter:blur(14px)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800}.logo,.welcomeLogo{display:grid;place-items:center;background:linear-gradient(135deg,#6677ff,#22d6c1);box-shadow:0 10px 35px #465eff33;font-weight:900}.logo{width:38px;height:38px;border-radius:12px}.brand small{display:block;color:var(--muted);font-size:10px;font-weight:500}
+.online{font-size:11px;color:var(--muted)}.online b{color:#49e7a5}.chat{flex:1;overflow:auto;padding:24px 12px 140px}.inner{max-width:850px;margin:auto}
+.welcome{text-align:center;padding:35px 10px}.welcomeLogo{width:66px;height:66px;margin:auto;border-radius:20px;font-size:24px}.welcome h1{font-size:28px;margin:17px 0 7px}.welcome p{color:var(--muted);max-width:620px;margin:auto;line-height:1.6;font-size:14px}
+.cards{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:20px}.cards button,.tool{border:1px solid var(--line);background:#0d1d31;color:#b8c9dc;border-radius:12px;padding:9px 12px}
+.msg{display:flex;gap:9px;margin:18px 0;align-items:flex-start}.msg.user{justify-content:flex-end}.avatar{width:34px;height:34px;min-width:34px;border-radius:11px;background:#172a40;display:grid;place-items:center;font-size:11px;font-weight:800;color:#b9c8ff}.user .avatar{order:2;background:#204064;color:white}
+.bubble{max-width:min(86%,720px);background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:12px 14px;line-height:1.6;font-size:14px;overflow:hidden}.user .bubble{background:#193451;border-color:#294d70;border-bottom-right-radius:5px}.assistant .bubble{border-bottom-left-radius:5px}.bubble p{margin:0 0 9px}.bubble p:last-child{margin-bottom:0}.bubble pre{background:#050b13;border:1px solid #1c2d40;padding:12px;border-radius:11px;overflow:auto;font-size:12px}.bubble code{font-family:monospace}.bubble :not(pre)>code{background:#14263b;padding:2px 5px;border-radius:5px}
+.typing{display:flex;gap:4px}.typing i{width:6px;height:6px;border-radius:50%;background:#8ea0b7;animation:t 1s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}@keyframes t{50%{opacity:.2;transform:translateY(-3px)}}
+.bottom{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,var(--bg) 25%);pointer-events:none}.composer{max-width:850px;margin:auto;background:#0a1728f5;border:1px solid #28415c;border-radius:18px;padding:9px;pointer-events:auto;box-shadow:0 -8px 35px #0005}
+.row{display:flex;gap:8px;align-items:flex-end}.icon,.send{width:44px;height:44px;border-radius:13px;border:1px solid #29445f;background:#10253b;color:#dceaff}.send{background:linear-gradient(135deg,#7180ff,#4d61ee);border:0;font-size:19px}textarea{flex:1;min-height:44px;max-height:140px;resize:none;border:0;outline:0;background:transparent;color:white;padding:11px 6px;line-height:1.45}textarea::placeholder{color:#71849a}.tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}.tool{font-size:11px;padding:7px 10px}.tool.active{border-color:#6172ff;background:#17244a;color:white}.file{display:none;color:#bdd0e6;font-size:11px;background:#132a42;padding:7px 9px;border-radius:9px;margin-bottom:7px}.err{color:#ff9ba7}
+@media(max-width:600px){.welcome{padding-top:28px}.welcome h1{font-size:24px}.bubble{font-size:13px;max-width:90%}.chat{padding-bottom:150px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header><div class="brand"><div class="logo">DK</div><div>DK AI Assistant<small>AI Coding • Explanation • Files</small></div></div><div class="online">● <b id="state">Online</b></div></header>
+<main class="chat" id="chat"><div class="inner" id="inner">
+<section class="welcome" id="welcome"><div class="welcomeLogo">✦</div><h1>Build your idea with AI</h1><p>আপনার app বা website-এর idea লিখুন। DK AI আপনার ভাষায় উত্তর দেবে, coding করবে এবং project file তৈরি করতে সাহায্য করবে।</p>
+<div class="cards"><button data-p="একটি professional calculator app বানাও">Calculator App</button><button data-p="একটি modern 3D car racing game lobby UI বানাও">Game UI</button><button data-p="আমার coding-এর সমস্যা explain করো">Explain Code</button></div></section>
+</div></main>
+<div class="bottom"><div class="composer"><div class="file" id="file"></div><div class="row"><button class="icon" id="upload">＋</button><input id="fileInput" type="file" hidden><textarea id="input" placeholder="Describe your app or ask for coding..."></textarea><button class="send" id="send">➤</button></div><div class="tools"><button class="tool active" data-a="coding_or_explanation">✦ AI Coding</button><button class="tool" data-a="files">▤ Generate Files</button><button class="tool" data-a="explain">◉ Explain My App</button></div></div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id), input=$('input'), inner=$('inner'), chat=$('chat'), send=$('send'), state=$('state');
+let action='coding_or_explanation',history=[],attached=null;
+function esc(x){return String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function render(x){let s=esc(x||'');s=s.replace(/```[\w+-]*\n?([\s\S]*?)```/g,'<pre><code>$1</code></pre>').replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\n\n+/g,'</p><p>').replace(/\n/g,'<br>');return '<p>'+s+'</p>'}
+function msg(who,text){$('welcome')?.remove();let d=document.createElement('div');d.className='msg '+who;let a=document.createElement('div');a.className='avatar';a.textContent=who==='user'?'YOU':'DK';let b=document.createElement('div');b.className='bubble';b.innerHTML=who==='assistant'?render(text):esc(text).replace(/\n/g,'<br>');if(who==='assistant'){d.append(a,b)}else{d.append(b,a)}inner.append(d);chat.scrollTop=chat.scrollHeight;return b}
+async function go(){let text=input.value.trim();if(!text||send.disabled)return;input.value='';input.style.height='44px';msg('user',text);history.push({role:'user',content:text});send.disabled=true;input.disabled=true;state.textContent='Thinking…';let b=msg('assistant','');b.innerHTML='<span class="typing"><i></i><i></i><i></i></span>';
+try{let p=text+(attached?'\n\nAttached file: '+attached.name:'');let r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,action,history})});let data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||data.message||('Server error '+r.status));let answer=data.text||data.response||data.message||data.output;if(!answer&&Array.isArray(data.files))answer=data.files.map(f=>f.name||'Generated file').join('\n');if(!answer)throw Error('AI returned an empty response.');b.innerHTML=render(answer);history.push({role:'assistant',content:String(answer)})}catch(e){b.innerHTML='<span class="err">⚠️ '+esc(e.message)+'</span>'}finally{send.disabled=false;input.disabled=false;state.textContent='Online';input.focus()}}
+send.onclick=go;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();go()}});input.addEventListener('input',()=>{input.style.height='44px';input.style.height=Math.min(input.scrollHeight,140)+'px'});
+document.querySelectorAll('.tool').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');action=b.dataset.a});
+document.querySelectorAll('.cards button').forEach(b=>b.onclick=()=>{input.value=b.dataset.p;input.dispatchEvent(new Event('input'));input.focus()});
+$('upload').onclick=()=>$('fileInput').click();$('fileInput').onchange=()=>{attached=$('fileInput').files[0]||null;let f=$('file');if(attached){f.style.display='block';f.textContent='📎 '+attached.name}else f.style.display='none'};
+</script>
+</body>
+</html>
