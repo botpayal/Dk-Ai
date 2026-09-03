@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 
@@ -9,33 +10,40 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// ===============================
-// HOME / SERVER TEST
-// ===============================
+// ==================================================
+// SERVE FRONTEND
+// ==================================================
+
+app.use(express.static(path.join(__dirname)));
 
 app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    name: "DK AI Builder",
-    message: "DK AI Server is running successfully."
-  });
+  res.sendFile(path.join(__dirname, "index.html"));
 });
+
+// ==================================================
+// SERVER TEST
+// ==================================================
 
 app.get("/api/hello", (req, res) => {
   res.json({
     success: true,
-    message: "Hello from DK AI!"
+    message: "Hello from DK AI!",
+    server: "DK AI Server",
+    status: "online"
   });
 });
 
-// ===============================
-// GEMINI
-// ===============================
+// ==================================================
+// GEMINI AI FUNCTION
+// ==================================================
 
 async function askGemini(prompt) {
   if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY is not configured in Render.");
+    throw new Error(
+      "GEMINI_API_KEY is not configured in Render Environment Variables."
+    );
   }
 
   const url =
@@ -50,6 +58,41 @@ async function askGemini(prompt) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
+      systemInstruction: {
+        parts: [
+          {
+            text: `
+You are DK AI Builder.
+
+You are an AI assistant specialized in helping users build software.
+
+Users may communicate in:
+- Bengali
+- English
+- Hindi
+- Hinglish
+- Urdu
+- Other languages
+
+Understand the user's language and reply in the same language when practical.
+
+Your main tasks are:
+
+1. Understand app and game ideas.
+2. Create complete coding when requested.
+3. Explain coding and project structure.
+4. Help users build websites, apps and games.
+5. Generate complete project files when requested.
+6. When multiple files are required, clearly separate them by filename.
+7. Never claim that a file was created unless its complete content is actually provided.
+8. Make generated code complete and usable.
+9. Follow the technology requested by the user when possible.
+10. Give practical step-by-step instructions.
+`
+          }
+        ]
+      },
+
       contents: [
         {
           role: "user",
@@ -60,6 +103,7 @@ async function askGemini(prompt) {
           ]
         }
       ],
+
       generationConfig: {
         temperature: 0.2
       }
@@ -69,68 +113,46 @@ async function askGemini(prompt) {
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data?.error?.message || "Gemini API request failed."
-    );
+    const errorMessage =
+      data &&
+      data.error &&
+      data.error.message
+        ? data.error.message
+        : "Gemini API request failed.";
+
+    throw new Error(errorMessage);
   }
 
-  const parts =
-    data?.candidates?.[0]?.content?.parts || [];
+  let text = "";
 
-  const text = parts
-    .map((part) => part.text || "")
-    .join("");
+  if (
+    data.candidates &&
+    data.candidates[0] &&
+    data.candidates[0].content &&
+    data.candidates[0].content.parts
+  ) {
+    for (const part of data.candidates[0].content.parts) {
+      if (part.text) {
+        text += part.text;
+      }
+    }
+  }
 
-  if (!text.trim()) {
+  if (!text) {
     throw new Error("Gemini returned an empty response.");
   }
 
   return text;
 }
 
-// ===============================
-// CLEAN GEMINI JSON
-// ===============================
-
-function extractJson(text) {
-  let cleaned = text.trim();
-
-  // Remove markdown code fences
-  cleaned = cleaned
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  // Direct JSON
-  try {
-    return JSON.parse(cleaned);
-  } catch (_) {}
-
-  // Find JSON object
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-
-  if (first !== -1 && last !== -1 && last > first) {
-    const possibleJson = cleaned.substring(first, last + 1);
-
-    try {
-      return JSON.parse(possibleJson);
-    } catch (_) {}
-  }
-
-  throw new Error("Gemini returned invalid JSON.");
-}
-
-// ===============================
-// GENERATE
-// ===============================
+// ==================================================
+// AI GENERATE API
+// ==================================================
 
 app.post("/api/generate", async (req, res) => {
   try {
     const prompt = req.body?.prompt;
-    const action =
-      req.body?.action || "coding_or_explanation";
+    const action = req.body?.action || "coding_or_explanation";
 
     if (!prompt || typeof prompt !== "string") {
       return res.status(400).json({
@@ -139,134 +161,144 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    // ===========================
+    // ==================================================
     // FILE GENERATION
-    // ===========================
+    // ==================================================
 
     if (action === "files") {
       const filePrompt = `
 You are DK AI Builder.
 
-The user wants to create a software project.
+The user wants a complete software project.
 
 USER REQUEST:
 ${prompt}
 
-Create the complete project.
+Create the complete project based on the request.
 
-IMPORTANT:
+Return ONLY valid JSON.
 
-- Generate ALL files required by the project.
-- There is NO fixed file limit.
-- A small project can have 1-5 files.
-- A larger project can have many files.
-- Every generated file must contain complete usable code.
-- Never create an empty placeholder file.
-- Use safe relative filenames only.
-- Do not use absolute paths.
-- Do not use Markdown code fences.
-- Do not add explanations outside the JSON.
-
-Return ONLY valid JSON in exactly this structure:
+Use exactly this structure:
 
 {
-  "projectName": "DK AI Project",
+  "projectName": "Project Name",
   "summary": "Short project description",
   "files": [
     {
       "name": "index.html",
-      "content": "<complete code>"
+      "content": "complete code here"
     },
     {
       "name": "style.css",
-      "content": "<complete code>"
+      "content": "complete code here"
     },
     {
       "name": "script.js",
-      "content": "<complete code>"
+      "content": "complete code here"
     }
   ]
 }
 
-If the project needs a different technology, generate the appropriate files.
+IMPORTANT RULES:
 
-Make sure the JSON is valid.
-Escape quotation marks and newlines correctly inside file content.
+- Generate every file actually required by the project.
+- There is NO fixed file limit.
+- A small project may have only a few files.
+- A larger project can have many files.
+- Every generated file must contain complete usable content.
+- Use safe relative filenames.
+- Do not use absolute paths.
+- Do not include Markdown code fences.
+- Do not include text outside the JSON.
+- Do not create fake or empty files.
+- Keep the project structure logical.
+- Make sure files work together.
 `;
 
-      const raw = await askGemini(filePrompt);
+      const rawResult = await askGemini(filePrompt);
 
       let result;
 
       try {
-        result = extractJson(raw);
+        result = JSON.parse(rawResult);
       } catch (error) {
-        return res.status(500).json({
-          success: false,
-          error: "Gemini could not generate files correctly.",
-          details: error.message
-        });
-      }
+        const firstBrace = rawResult.indexOf("{");
+        const lastBrace = rawResult.lastIndexOf("}");
 
-      if (!result || !Array.isArray(result.files)) {
-        return res.status(500).json({
-          success: false,
-          error: "Gemini response does not contain project files."
-        });
-      }
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          const extracted = rawResult.substring(
+            firstBrace,
+            lastBrace + 1
+          );
 
-      const files = [];
-
-      for (const file of result.files) {
-        if (
-          !file ||
-          typeof file.name !== "string" ||
-          typeof file.content !== "string"
-        ) {
-          continue;
+          try {
+            result = JSON.parse(extracted);
+          } catch (e) {
+            return res.status(500).json({
+              success: false,
+              error: "Gemini returned invalid file JSON.",
+              raw: rawResult
+            });
+          }
+        } else {
+          return res.status(500).json({
+            success: false,
+            error: "Gemini returned an invalid file response.",
+            raw: rawResult
+          });
         }
-
-        let safeName = file.name
-          .replace(/\\/g, "/")
-          .split("/")
-          .pop();
-
-        safeName = safeName.replace(
-          /[^a-zA-Z0-9._-]/g,
-          "_"
-        );
-
-        if (!safeName) {
-          continue;
-        }
-
-        files.push({
-          name: safeName,
-          content: file.content
-        });
       }
 
-      if (files.length === 0) {
+      if (!Array.isArray(result.files)) {
         return res.status(500).json({
           success: false,
-          error: "No valid project files were generated."
+          error: "No project files were generated."
         });
       }
+
+      const files = result.files
+        .filter(
+          (file) =>
+            file &&
+            typeof file.name === "string" &&
+            typeof file.content === "string"
+        )
+        .map((file) => {
+          let safeName = file.name
+            .replace(/\\/g, "/")
+            .split("/")
+            .pop();
+
+          safeName = safeName.replace(
+            /[^a-zA-Z0-9._-]/g,
+            "_"
+          );
+
+          if (!safeName) {
+            safeName = "generated_file.txt";
+          }
+
+          return {
+            name: safeName,
+            content: file.content
+          };
+        });
 
       return res.json({
         success: true,
         type: "files",
         projectName:
           result.projectName || "DK AI Project",
-        summary: result.summary || "",
+        summary:
+          result.summary || "",
         fileCount: files.length,
         files
       });
     }
 
-    // ===========================
-    // NORMAL AI / CODING
-    // ===========================
+    // ==================================================
+    // NORMAL AI ANSWER
+    // ==================================================
 
     const codingPrompt = `
 You are DK AI Builder.
@@ -274,23 +306,24 @@ You are DK AI Builder.
 USER REQUEST:
 ${prompt}
 
-Help the user build their project.
-
-The user can communicate in Bengali, English, Hindi,
-Hinglish, Urdu, or other languages.
+Understand exactly what the user wants.
 
 If the user asks for coding:
 
 - Give complete usable code.
-- Clearly show filenames.
-- If multiple files are required, separate them by filename.
-- Do not leave important code incomplete.
+- If multiple files are required, clearly separate each file by filename.
+- Include all important code.
+- Do not leave critical parts as placeholders.
 
 If the user asks for an explanation:
 
 - Explain clearly.
-- Keep the instructions practical.
-- Understand the user's language automatically.
+- Give practical step-by-step instructions.
+- Keep the explanation easy to follow.
+
+The user may use Bengali, English, Hindi, Hinglish, Urdu, or another language.
+
+Understand the request regardless of language.
 `;
 
     const answer = await askGemini(codingPrompt);
@@ -306,16 +339,29 @@ If the user asks for an explanation:
 
     return res.status(500).json({
       success: false,
-      error: error.message || "Internal server error."
+      error:
+        error.message ||
+        "Internal server error."
     });
   }
 });
 
-// ===============================
-// START
-// ===============================
+// ==================================================
+// 404 API HANDLER
+// ==================================================
 
-app.listen(PORT, () => {
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "API endpoint not found."
+  });
+});
+
+// ==================================================
+// START SERVER
+// ==================================================
+
+app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `DK AI Server running on port ${PORT}`
   );
