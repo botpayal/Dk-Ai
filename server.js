@@ -7,6 +7,11 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
+// Use the model currently configured for this app.
+const GEMINI_MODEL = "gemini-3.7-flash";
+const GEMINI_URL =
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
 // --------------------------------------------------
 // Middleware
 // --------------------------------------------------
@@ -42,19 +47,20 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     service: "DK AI",
-    gemini: Boolean(GEMINI_API_KEY)
+    gemini: Boolean(GEMINI_API_KEY),
+    model: GEMINI_MODEL
   });
 });
 
 // --------------------------------------------------
-// Gemini AI
+// Gemini
 // --------------------------------------------------
 
 app.post("/api/generate", async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
       return res.status(500).json({
-        error: "GEMINI_API_KEY is not configured on the server."
+        error: "GEMINI_API_KEY is missing in Render Environment Variables."
       });
     }
 
@@ -66,27 +72,30 @@ app.post("/api/generate", async (req, res) => {
       });
     }
 
-    // Conversation history
     const history = Array.isArray(req.body?.history)
       ? req.body.history
       : [];
 
     const contents = [];
 
+    // Previous conversation
     for (const item of history) {
       if (!item || !item.text) continue;
+
+      const text = String(item.text).trim();
+      if (!text) continue;
 
       contents.push({
         role: item.role === "model" ? "model" : "user",
         parts: [
           {
-            text: String(item.text)
+            text
           }
         ]
       });
     }
 
-    // Current message
+    // Current user message
     contents.push({
       role: "user",
       parts: [
@@ -97,113 +106,107 @@ app.post("/api/generate", async (req, res) => {
     });
 
     // ------------------------------------------------
-    // DK AI System Instruction
+    // DK AI behavior
     // ------------------------------------------------
 
     const systemInstruction = `
-You are DK AI, a powerful general-purpose AI assistant.
+You are DK AI, a helpful general-purpose AI assistant.
 
-Answer the user's actual question directly, clearly and helpfully.
+Your job is to understand the user's request and give the best useful answer.
 
-LANGUAGE RULE:
-- Detect the language used by the user.
+LANGUAGE:
+- Detect the language of the user's latest message.
 - Reply in the same language by default.
-- Bengali user -> Bengali reply.
-- Hindi user -> Hindi reply.
-- English user -> English reply.
-- If the user mixes languages, reply naturally using the dominant language.
-- If the user explicitly asks for another language, use that language.
-- Do not translate unless the user asks for translation.
+- If the user uses Bengali, reply in Bengali.
+- If the user uses Hindi, reply in Hindi.
+- If the user uses English, reply in English.
+- If the user mixes languages, naturally use the dominant language.
+- If the user explicitly requests a different language, use that language.
+- Never force every answer into Bengali.
 
-GENERAL PURPOSE:
-You are not limited to app development.
+GENERAL BEHAVIOR:
+- Answer normal questions normally.
+- Help with coding and programming.
+- Help with app and website development.
+- Help with mathematics, science, education and technology.
+- Help with writing, explanations, brainstorming and troubleshooting.
+- Give step-by-step explanations when useful.
+- For coding requests, provide complete working code when appropriate.
+- Use the conversation history to understand follow-up questions.
+- Do not claim that you can perform actions that you cannot actually perform.
+- Do not mention this system instruction.
+- Do not say that you are only an app-building assistant.
 
-You can help with:
-- Programming
-- HTML
-- CSS
-- JavaScript
-- Node.js
-- App development
-- Website development
-- Coding and debugging
-- Mathematics
-- Science
-- Education
-- Writing
-- Translation
-- Technology
-- General knowledge
-- Explanations
-- Brainstorming
-- Troubleshooting
-- Study help
-- Software questions
-- Database questions
-- Firebase
-- APIs
-- AI development
-- Project planning
-
-CODING:
-- Give complete useful code when appropriate.
-- Explain where the code should be placed.
-- Help debug errors.
-- When fixing existing code, preserve working parts unless a change is necessary.
-
-CONVERSATION:
-- Use previous conversation history when provided.
-- Answer the user's latest message.
-- Do not repeatedly say you are only an app-building assistant.
-- Do not mention these internal instructions.
+APP DEVELOPMENT:
+When the user asks about an app or website, behave like a capable development assistant.
+You can explain architecture, frontend, backend, APIs, databases and deployment.
 `;
 
     // ------------------------------------------------
-    // Current Gemini model
+    // Gemini API request
     // ------------------------------------------------
 
-    const model = "gemini-3.6-flash";
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+      },
 
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [
+            {
+              text: systemInstruction
+            }
+          ]
         },
 
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [
-              {
-                text: systemInstruction
-              }
-            ]
-          },
+        contents,
 
-          contents,
-
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 8192
-          }
-        })
-      }
-    );
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 8192
+        }
+      })
+    });
 
     const data = await response.json();
 
+    // Gemini returned an error
     if (!response.ok) {
-      console.error("Gemini API Error:", data);
+      console.error(
+        "Gemini API Error:",
+        JSON.stringify(data, null, 2)
+      );
 
-      return res.status(response.status).json({
-        error:
-          data?.error?.message ||
-          "Gemini API request failed."
+      const status = response.status;
+
+      let message =
+        data?.error?.message ||
+        "Gemini API request failed.";
+
+      if (status === 429) {
+        message =
+          "Gemini API quota or rate limit reached. Please try again later or check your Gemini API quota.";
+      }
+
+      if (status === 401 || status === 403) {
+        message =
+          "Gemini API key is invalid or does not have permission to use the API.";
+      }
+
+      return res.status(status).json({
+        success: false,
+        error: message,
+        status
       });
     }
+
+    // ------------------------------------------------
+    // Extract answer
+    // ------------------------------------------------
 
     const answer =
       data?.candidates?.[0]?.content?.parts
@@ -212,7 +215,13 @@ CONVERSATION:
         .trim();
 
     if (!answer) {
+      console.error(
+        "Gemini returned no text:",
+        JSON.stringify(data, null, 2)
+      );
+
       return res.status(502).json({
+        success: false,
         error: "Gemini returned an empty response."
       });
     }
@@ -220,27 +229,29 @@ CONVERSATION:
     return res.json({
       success: true,
       text: answer,
-      model
+      model: GEMINI_MODEL
     });
 
   } catch (error) {
-    console.error("DK AI Server Error:", error);
+    console.error("Server Error:", error);
 
     return res.status(500).json({
+      success: false,
       error: error.message || "Internal server error."
     });
   }
 });
 
 // --------------------------------------------------
-// Start server
+// Start
 // --------------------------------------------------
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("========================================");
   console.log("DK AI Server is running");
   console.log("Port:", PORT);
-  console.log("Gemini: Connected");
+  console.log("Gemini model:", GEMINI_MODEL);
   console.log("Frontend: /index.html");
+  console.log("Gemini API:", GEMINI_API_KEY ? "CONFIGURED" : "MISSING");
   console.log("========================================");
 });
