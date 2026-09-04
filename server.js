@@ -1,175 +1,334 @@
+// server.js
+// DK AI Backend
+// Serves index.html and connects /api/generate to Gemini API
+
 const express = require("express");
+const cors = require("cors");
 const path = require("path");
 
 const app = express();
 
-const PORT = process.env.PORT || 10000;
-
-// Gemini API key Render Environment Variables থেকে নেবে
+const PORT = process.env.PORT || 3000;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Current Gemini model
-const GEMINI_MODEL = "gemini-3.7-flash";
+// Stable Gemini model.
+// Can be changed from Render Environment Variables if needed.
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+const GEMINI_API_URL =
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-// --------------------------------------------------
+// ----------------------------------------------------
+// Middleware
+// ----------------------------------------------------
+
+app.use(
+  cors({
+    origin: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+app.use(
+  express.json({
+    limit: "20mb",
+  })
+);
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "20mb",
+  })
+);
+
+// ----------------------------------------------------
+// Static frontend
+// ----------------------------------------------------
+
+app.use(express.static(path.join(__dirname, "public")));
+
+// ----------------------------------------------------
 // Health check
-// --------------------------------------------------
+// ----------------------------------------------------
+
 app.get("/health", (req, res) => {
   res.json({
-    success: true,
-    name: "DK AI Builder",
-    message: "DK AI Server is running successfully.",
+    ok: true,
+    service: "DK AI",
+    gemini: Boolean(GEMINI_API_KEY),
     model: GEMINI_MODEL,
-    apiConfigured: !!GEMINI_API_KEY
   });
 });
 
-// --------------------------------------------------
-// Main API: POST /api/generate
-// --------------------------------------------------
+// ----------------------------------------------------
+// Gemini API
+// ----------------------------------------------------
+
 app.post("/api/generate", async (req, res) => {
   try {
     if (!GEMINI_API_KEY) {
       return res.status(500).json({
-        success: false,
-        error: "GEMINI_API_KEY is not configured on the server."
+        error:
+          "GEMINI_API_KEY is not configured on the server."
       });
     }
 
-    const prompt = req.body?.prompt;
+    const body = req.body || {};
 
-    if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    const prompt =
+      typeof body.prompt === "string"
+        ? body.prompt.trim()
+        : "";
+
+    if (!prompt) {
       return res.status(400).json({
-        success: false,
-        error: "Please provide a prompt."
+        error: "Please enter a message."
       });
     }
 
-    // Optional action from your HTML app
-    const action = req.body?.action || "coding_or_explanation";
+    // Accept several common history formats.
+    const history =
+      Array.isArray(body.history)
+        ? body.history
+        : Array.isArray(body.messages)
+        ? body.messages
+        : [];
+
+    // ------------------------------------------------
+    // System instruction
+    // ------------------------------------------------
 
     const systemInstruction = `
-You are DK AI, a helpful AI assistant and coding expert.
+You are DK AI, a general-purpose AI assistant.
 
-User language can be Bengali, English, Hindi, or mixed language.
-Reply naturally in the language used by the user.
+Your job is to help users with:
+- General questions
+- Education and explanations
+- Programming and coding
+- HTML, CSS, JavaScript and web development
+- App ideas and development
+- Debugging
+- Writing and rewriting
+- Mathematics
+- Science
+- Technology
+- Business and productivity
+- Creative brainstorming
+- Step-by-step instructions
+- Multilingual conversation
 
-You help users:
-- plan apps
-- write HTML, CSS and JavaScript
-- create Node.js backends
-- explain coding
-- debug errors
-- create game/app project structures
-- generate multiple project files when requested
+LANGUAGE RULE:
+Always detect the language used by the user.
+Reply in the same language as the user's latest message unless the user explicitly asks for another language.
 
-When the user asks for coding, provide clean, complete and runnable code.
-Do not put unnecessary explanations inside code blocks.
+Examples:
+- Bengali user -> Bengali reply
+- English user -> English reply
+- Hindi user -> Hindi reply
+- Urdu user -> Urdu reply
+- Mixed Bengali/English -> naturally use the same mixed style when appropriate.
 
-Current requested action: ${action}
+Do not automatically translate the user's message into English.
+
+CONVERSATION:
+Use the previous conversation context when it is provided.
+Remember what the user is currently asking and answer the latest question directly.
+
+STYLE:
+Be helpful, natural and conversational.
+Do not repeatedly say that you are an AI.
+For coding requests, provide working code and explain where it should be placed.
+For troubleshooting, identify the likely problem and give practical steps.
+If the user asks for a complete file, provide a complete ready-to-use file.
+Do not unnecessarily change unrelated parts of the user's project.
+
+APP BUILDER MODE:
+When the user describes an app or website they want to build, understand the requirements first and then provide:
+1. What needs to be built
+2. The required files
+3. Working code
+4. Setup instructions
+5. Testing instructions
+
+Keep the response focused on the user's request.
 `;
 
-    const finalPrompt = `${systemInstruction}
+    // ------------------------------------------------
+    // Build Gemini contents
+    // ------------------------------------------------
 
-USER REQUEST:
-${prompt.trim()}
-`;
+    const contents = [];
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          contents: [
+    // Previous conversation
+    for (const item of history) {
+      if (!item) continue;
+
+      let role = item.role;
+      let text = "";
+
+      if (typeof item.content === "string") {
+        text = item.content;
+      } else if (typeof item.text === "string") {
+        text = item.text;
+      } else if (typeof item.message === "string") {
+        text = item.message;
+      }
+
+      if (!text.trim()) continue;
+
+      // Gemini accepts user/model roles.
+      if (role !== "user" && role !== "model") {
+        role = "user";
+      }
+
+      contents.push({
+        role,
+        parts: [
+          {
+            text: text.trim()
+          }
+        ]
+      });
+    }
+
+    // Latest user message
+    contents.push({
+      role: "user",
+      parts: [
+        {
+          text: prompt
+        }
+      ]
+    });
+
+    // ------------------------------------------------
+    // Gemini request
+    // ------------------------------------------------
+
+    const geminiResponse = await fetch(GEMINI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [
             {
-              parts: [
-                {
-                  text: finalPrompt
-                }
-              ]
+              text: systemInstruction
             }
           ]
-        })
+        },
+
+        contents,
+
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          maxOutputTokens: 8192
+        }
+      })
+    });
+
+    const data = await geminiResponse.json();
+
+    // ------------------------------------------------
+    // Gemini error
+    // ------------------------------------------------
+
+    if (!geminiResponse.ok) {
+      console.error(
+        "Gemini API Error:",
+        JSON.stringify(data, null, 2)
+      );
+
+      const message =
+        data?.error?.message ||
+        "Gemini API request failed.";
+
+      return res.status(geminiResponse.status).json({
+        error: message
+      });
+    }
+
+    // ------------------------------------------------
+    // Extract response text
+    // ------------------------------------------------
+
+    let answer = "";
+
+    if (Array.isArray(data?.candidates)) {
+      for (const candidate of data.candidates) {
+        const parts = candidate?.content?.parts;
+
+        if (Array.isArray(parts)) {
+          for (const part of parts) {
+            if (typeof part?.text === "string") {
+              answer += part.text;
+            }
+          }
+        }
       }
-    );
+    }
 
-    const data = await response.json();
+    answer = answer.trim();
 
-    if (!response.ok) {
-      console.error("Gemini API Error:", data);
-
-      return res.status(response.status).json({
-        success: false,
+    if (!answer) {
+      return res.status(502).json({
         error:
-          data?.error?.message ||
-          "Gemini API request failed.",
-        details: data
+          "Gemini returned an empty response."
       });
     }
 
-    const text =
-      data?.candidates?.[0]?.content?.parts
-        ?.map(part => part.text || "")
-        .join("") || "";
-
-    if (!text) {
-      return res.status(500).json({
-        success: false,
-        error: "Gemini returned an empty response."
-      });
-    }
+    // ------------------------------------------------
+    // Return response to your HTML app
+    // ------------------------------------------------
 
     return res.json({
       success: true,
-      model: GEMINI_MODEL,
-      text: text
+      text: answer,
+      response: answer,
+      model: GEMINI_MODEL
     });
 
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("DK AI Server Error:", error);
 
     return res.status(500).json({
-      success: false,
-      error: error.message || "Internal server error."
+      error:
+        error?.message ||
+        "Internal server error."
     });
   }
 });
 
-// --------------------------------------------------
-// Serve your frontend
-// --------------------------------------------------
+// ----------------------------------------------------
+// Fallback: open index.html
+// ----------------------------------------------------
 
-const PUBLIC_DIR = __dirname;
-
-app.use(express.static(PUBLIC_DIR));
-
-// Render URL খুললে index.html দেখাবে
-app.get("/", (req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+app.get("*", (req, res) => {
+  res.sendFile(
+    path.join(__dirname, "public", "index.html")
+  );
 });
 
-// --------------------------------------------------
-// 404
-// --------------------------------------------------
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Route not found."
-  });
-});
-
-// --------------------------------------------------
+// ----------------------------------------------------
 // Start server
-// --------------------------------------------------
+// ----------------------------------------------------
+
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`DK AI Server running on port ${PORT}`);
-  console.log(`Gemini model: ${GEMINI_MODEL}`);
-  console.log(`Frontend: /index.html`);
+  console.log(
+    `DK AI Server running on port ${PORT}`
+  );
+
+  console.log(
+    `Gemini model: ${GEMINI_MODEL}`
+  );
+
+  console.log(
+    `Gemini API key configured: ${Boolean(GEMINI_API_KEY)}`
+  );
 });
